@@ -149,14 +149,21 @@ function App() {
           usedOCR = true
         }
 
-        const keyPoints = usedOCR ? createKeyPointsFromProse(text) : createKeyPoints(text, pageNumber)
-        const slideType = detectSlideType(text, keyPoints, usedOCR)
+        const worksheetRows = extractWorksheetRows(text)
+        let keyPoints = worksheetRows.length > 0 ? createWorksheetKeyPoints(worksheetRows) : []
+
+        if (keyPoints.length === 0) {
+          keyPoints = usedOCR ? createKeyPointsFromProse(text) : createKeyPoints(text, pageNumber)
+        }
+
+        const slideType = worksheetRows.length > 0 ? 'worksheet-table' : detectSlideType(text, keyPoints, usedOCR)
         const slideExplanation = createSlideExplanation({
           text,
           keyPoints,
           slideType,
           usedOCR,
           seenConceptLabels,
+          worksheetRows,
         })
 
         extractedSlides.push({
@@ -166,6 +173,7 @@ function App() {
           keyPoints,
           usedOCR,
           slideType,
+          worksheetRows,
           slideExplanation,
         })
       }
@@ -236,6 +244,193 @@ function App() {
     return canvas.toDataURL('image/jpeg', 0.85)
   }
 
+  function extractWorksheetRows(text) {
+    if (!text) {
+      return []
+    }
+
+    const lowerText = text.toLowerCase()
+    const isUnitOperationTable =
+      lowerText.includes('unit operation') &&
+      (lowerText.includes('why selected') || lowerText.includes('objective/design') || lowerText.includes('design requirement'))
+
+    if (!isUnitOperationTable) {
+      return []
+    }
+
+    const operations = [
+      'Nitrification and Denitrification',
+      'Chemical Precipitation',
+      'Reverse Osmosis',
+      'Sedimentation',
+      'Filtration',
+      'Screening',
+      'Flotation',
+    ]
+
+    const operationPattern = operations
+      .map((operation) => operation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|')
+
+    const normalisedText = cleanSpacing(
+      text
+        .replace(/Team Member\s+Name/gi, 'Team Member Name ')
+        .replace(/Unit Operation/gi, 'Unit Operation ')
+        .replace(/Why selected\?/gi, 'Why selected? ')
+        .replace(/Link to\s+objective\/design\s+requirement/gi, 'Link to objective/design requirement ')
+        .replace(/objective\/design\s+requirement/gi, 'objective/design requirement ')
+    )
+
+    // Important: this regex is case-sensitive on purpose. Otherwise words inside
+    // a paragraph such as "filtration methods" get mistaken for a new table row.
+    const operationRegex = new RegExp(`\\b(${operationPattern})\\b`, 'g')
+    const operationMatches = []
+    let operationMatch
+
+    while ((operationMatch = operationRegex.exec(normalisedText)) !== null) {
+      const nameInfo = findNameBeforeOperation(normalisedText, operationMatch.index)
+
+      if (!nameInfo) {
+        continue
+      }
+
+      operationMatches.push({
+        name: nameInfo.name,
+        nameStart: nameInfo.start,
+        operation: operationMatch[1],
+        operationStart: operationMatch.index,
+        operationEnd: operationRegex.lastIndex,
+      })
+    }
+
+    const rows = []
+
+    for (let index = 0; index < operationMatches.length; index++) {
+      const current = operationMatches[index]
+      const next = operationMatches[index + 1]
+      const bodyEnd = next ? next.nameStart : normalisedText.length
+      const body = cleanSpacing(normalisedText.slice(current.operationEnd, bodyEnd))
+
+      if (body.length < 20) {
+        continue
+      }
+
+      const { whySelected, designLink } = splitWorksheetRowBody(body)
+
+      rows.push({
+        name: current.name,
+        operation: current.operation,
+        whySelected,
+        designLink,
+      })
+    }
+
+    return rows
+  }
+
+  function findNameBeforeOperation(text, operationIndex) {
+    const sliceStart = Math.max(0, operationIndex - 180)
+    const beforeOperation = text.slice(sliceStart, operationIndex)
+    const match = beforeOperation.match(/([A-Z][A-Za-z']*(?:\s+[A-Z][A-Za-z']*){0,4})\s*$/)
+
+    if (!match) {
+      return null
+    }
+
+    const headerWords = new Set([
+      'Team', 'Member', 'Name', 'Unit', 'Operation', 'Why', 'Selected', 'Link',
+      'Objective', 'Design', 'Requirement', 'Task', 'Class', 'Today', 'Checklist',
+    ])
+
+    const words = match[1]
+      .split(/\s+/)
+      .filter((word) => word && !headerWords.has(word))
+
+    if (words.length === 0) {
+      return null
+    }
+
+    const name = cleanSpacing(words.join(' '))
+
+    // Do not accept long text fragments as names.
+    if (name.split(/\s+/).length > 4 || name.length < 3) {
+      return null
+    }
+
+    return {
+      name,
+      start: sliceStart + beforeOperation.length - match[0].length + match[0].lastIndexOf(words[0]),
+    }
+  }
+
+  function splitWorksheetRowBody(body) {
+    const cleanedBody = cleanSpacing(body)
+
+    const designStartPatterns = [
+      /\bIt doesn[’']t create\b/i,
+      /\bIt can help\b/i,
+      /\bTo maintain\b/i,
+      /\bIt allows\b/i,
+      /\bCan remove\b/i,
+      /\bIt can be carried\b/i,
+      /\bThis process likely\b/i,
+      /\bThis process doesn[’']t\b/i,
+    ]
+
+    for (const pattern of designStartPatterns) {
+      const match = cleanedBody.match(pattern)
+
+      if (match && match.index > 40) {
+        return {
+          whySelected: cleanSpacing(cleanedBody.slice(0, match.index)),
+          designLink: cleanSpacing(cleanedBody.slice(match.index)),
+        }
+      }
+    }
+
+    const sentencePieces = splitIntoReadableSentences(cleanedBody)
+
+    if (sentencePieces.length <= 1) {
+      return {
+        whySelected: cleanedBody,
+        designLink: '',
+      }
+    }
+
+    const splitIndex = Math.max(1, Math.ceil(sentencePieces.length * 0.65))
+
+    return {
+      whySelected: sentencePieces.slice(0, splitIndex).join(' '),
+      designLink: sentencePieces.slice(splitIndex).join(' '),
+    }
+  }
+
+  function splitIntoReadableSentences(text) {
+    return text
+      .replace(/\s+/g, ' ')
+      .split(/(?<=[.!?])\s+/)
+      .map(cleanPoint)
+      .filter((sentence) => sentence.length >= 10)
+  }
+
+  function createWorksheetKeyPoints(rows) {
+    if (rows.length === 0) {
+      return []
+    }
+
+    const operationList = rows
+      .slice(0, 4)
+      .map((row) => row.operation)
+      .filter((operation, index, array) => array.indexOf(operation) === index)
+      .join(', ')
+
+    return [
+      `This worksheet table lists ${rows.length} proposed unit operation${rows.length === 1 ? '' : 's'}.`,
+      `Main operation${rows.length === 1 ? '' : 's'} shown: ${operationList}.`,
+      'Use the table summary below instead of reading the row as broken bullet points.',
+    ]
+  }
+
   function isFallbackOnly(points) {
     return points.every((point) => {
       const lowerPoint = point.toLowerCase()
@@ -302,7 +497,19 @@ function App() {
     return 'concept'
   }
 
-  function createSlideExplanation({ text, keyPoints, slideType, usedOCR, seenConceptLabels }) {
+  function createSlideExplanation({ text, keyPoints, slideType, usedOCR, seenConceptLabels, worksheetRows = [] }) {
+    if (slideType === 'worksheet-table') {
+      return {
+        title: 'Worksheet / Table Summary',
+        bullets: [
+          'This page is a table/worksheet, so the app keeps each row together instead of splitting the table into random bullet points.',
+        ],
+        formulas: [],
+        concepts: [],
+        tableRows: worksheetRows,
+      }
+    }
+
     if (slideType === 'navigation') {
       return {
         title: 'Slide Purpose',
@@ -1404,6 +1611,31 @@ function App() {
                         <li key={index}>{bullet}</li>
                       ))}
                     </ul>
+                  )}
+
+                  {slide.slideExplanation.tableRows?.length > 0 && (
+                    <div className="worksheet-table-wrap">
+                      <table className="worksheet-summary-table">
+                        <thead>
+                          <tr>
+                            <th>Team member</th>
+                            <th>Unit operation</th>
+                            <th>Why selected</th>
+                            <th>Design link</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {slide.slideExplanation.tableRows.map((row, index) => (
+                            <tr key={`${row.name}-${row.operation}-${index}`}>
+                              <td>{row.name}</td>
+                              <td>{row.operation}</td>
+                              <td>{row.whySelected}</td>
+                              <td>{row.designLink || 'Not clearly separated in the extracted table text.'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
 
                   {slide.slideExplanation.formulas.length > 0 && (

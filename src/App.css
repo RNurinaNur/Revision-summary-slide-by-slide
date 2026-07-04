@@ -390,3 +390,34 @@ summary {
   color: #f8fafc !important;
   font-weight: 700;
 }
+
+.worksheet-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.worksheet-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.worksheet-summary-table th,
+.worksheet-summary-table td {
+  border: 1px solid #334155;
+  padding: 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.worksheet-summary-table th {
+  background: #0f1f2e;
+  color: #a7f3d0;
+  font-weight: 800;
+}
+
+.worksheet-summary-table td {
+  color: #e5e7eb;
+}
