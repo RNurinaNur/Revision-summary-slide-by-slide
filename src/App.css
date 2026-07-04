@@ -1,0 +1,392 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Aptos, Arial, "Liberation Sans", "Helvetica Neue", Helvetica, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.25), transparent 35%),
+    #020617;
+  color: #e5e7eb;
+}
+
+.app {
+  min-height: 100vh;
+  width: 100%;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.hero-card,
+.card {
+  width: 100%;
+  max-width: 1000px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid #1e293b;
+  border-radius: 24px;
+  padding: 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.hero-card {
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #93c5fd;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(42px, 6vw, 72px);
+  line-height: 1;
+  font-family: Aptos, "Arial Narrow", Arial, "Liberation Sans Narrow", sans-serif;
+  font-weight: 700;
+}
+
+h2,
+h3,
+h4 {
+  color: #f8fafc;
+  font-family: Aptos, "Arial Narrow", Arial, "Liberation Sans Narrow", sans-serif;
+  font-weight: 700;
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 28px;
+}
+
+h3 {
+  margin-top: 0;
+}
+
+.subtitle {
+  max-width: 720px;
+  margin: 16px auto 24px;
+  color: #cbd5e1;
+  font-size: 18px;
+}
+
+.upload-box {
+  margin: 20px auto;
+  padding: 18px;
+  max-width: 720px;
+  border: 1px dashed #334155;
+  border-radius: 18px;
+  background: #0f172a;
+}
+
+input {
+  color: #e5e7eb;
+}
+
+.button-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+button {
+  border: none;
+  padding: 12px 20px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+  background: #2563eb;
+  color: white;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.secondary-button {
+  background: #475569;
+}
+
+.secondary-button:hover {
+  background: #334155;
+}
+
+.status {
+  color: #93c5fd;
+  font-weight: 700;
+}
+
+.error {
+  color: #f87171;
+  font-weight: 700;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.6;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 16px;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  overflow-x: auto;
+}
+
+.slide-card {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid #334155;
+  border-radius: 18px;
+  background: #0f172a;
+}
+
+.slide-preview {
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 14px;
+  margin: 14px 0;
+}
+
+.key-points {
+  margin-top: 16px;
+  padding: 16px;
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+}
+
+.key-points ul {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.key-points li {
+  margin-bottom: 10px;
+  line-height: 1.6;
+  color: #dbeafe;
+}
+
+.slide-explanation {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 14px;
+}
+
+.slide-explanation h4 {
+  color: #4ade80;
+  margin-top: 0;
+}
+
+.slide-explanation dl {
+  margin: 0;
+}
+
+.concept-note {
+  margin-bottom: 14px;
+}
+
+.concept-note:last-child {
+  margin-bottom: 0;
+}
+
+.concept-note dt {
+  font-weight: 700;
+  color: #86efac;
+  margin-bottom: 4px;
+}
+
+.concept-note dd {
+  margin: 0;
+  color: #dcfce7;
+  line-height: 1.6;
+}
+
+summary {
+  cursor: pointer;
+  margin-top: 16px;
+  color: #93c5fd;
+  font-weight: 700;
+}
+
+/* --- Structured overall summary --- */
+.summary-section {
+  margin-top: 20px;
+}
+
+.summary-section:first-child {
+  margin-top: 0;
+}
+
+.summary-section h3 {
+  font-size: 16px;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.summary-meta {
+  color: #94a3b8;
+  margin: 0 0 4px;
+}
+
+.keyword-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keyword-chip {
+  background: #1e293b;
+  color: #bfdbfe;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 14px;
+}
+
+.summary-list {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.summary-list li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+  color: #dbeafe;
+}
+
+.summary-note {
+  margin-top: 20px;
+  padding: 12px 16px;
+  border-left: 3px solid #2563eb;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+/* --- Extracted text, rendered as real lines/rows instead of one blob --- */
+.extracted-text {
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.extracted-line {
+  line-height: 1.6;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  white-space: pre-wrap;
+}
+
+.extracted-line:last-child {
+  border-bottom: none;
+}
+
+.extracted-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.extracted-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.extracted-table td:first-child {
+  width: 46px;
+  font-weight: 700;
+  color: #93c5fd;
+  text-align: center;
+}
+
+.ocr-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.slide-explanation ul {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.slide-explanation li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+  color: #dcfce7;
+}
+
+.formula-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.formula-card {
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.formula-card p {
+  margin: 6px 0 0;
+  color: #dcfce7;
+  line-height: 1.6;
+}
+
+.formula-label {
+  margin-top: 0 !important;
+  color: #86efac !important;
+  font-weight: 700;
+}
+
+.formula-text {
+  font-family: Aptos, Arial, sans-serif;
+  font-size: 18px;
+  color: #f8fafc !important;
+  font-weight: 700;
+}
