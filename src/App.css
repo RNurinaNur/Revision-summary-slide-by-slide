@@ -421,3 +421,17 @@ summary {
 .worksheet-summary-table td {
   color: #e5e7eb;
 }
+
+.table-bullet-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.table-bullet-list li {
+  margin-bottom: 8px;
+  line-height: 1.55;
+}
+
+.table-bullet-list li:last-child {
+  margin-bottom: 0;
+}

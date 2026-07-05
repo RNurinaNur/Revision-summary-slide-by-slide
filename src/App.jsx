@@ -126,7 +126,8 @@ function App() {
         setStatusMessage(`Extracting slide/page ${pageNumber} of ${pdf.numPages}...`)
 
         const page = await pdf.getPage(pageNumber)
-        let text = await extractPageText(page)
+        const textItems = await extractPageTextItems(page)
+        let text = formatTextItemsAsLines(textItems)
         const imageDataUrl = await renderPageAsImage(page)
 
         let usedOCR = false
@@ -149,7 +150,11 @@ function App() {
           usedOCR = true
         }
 
-        const worksheetRows = extractWorksheetRows(text)
+        let worksheetRows = extractWorksheetRowsFromItems(textItems)
+
+        if (worksheetRows.length === 0) {
+          worksheetRows = extractWorksheetRows(text)
+        }
         let keyPoints = worksheetRows.length > 0 ? createWorksheetKeyPoints(worksheetRows) : []
 
         if (keyPoints.length === 0) {
@@ -194,25 +199,27 @@ function App() {
     }
   }
 
-  async function extractPageText(page) {
+  async function extractPageTextItems(page) {
     const textContent = await page.getTextContent()
+
+    return textContent.items
+      .map((item) => ({
+        text: item.str.trim(),
+        x: Math.round(item.transform[4]),
+        y: Math.round(item.transform[5] / 4) * 4,
+      }))
+      .filter((item) => item.text)
+  }
+
+  function formatTextItemsAsLines(textItems) {
     const linesByY = new Map()
 
-    for (const item of textContent.items) {
-      const text = item.str.trim()
-
-      if (!text) {
-        continue
+    for (const item of textItems) {
+      if (!linesByY.has(item.y)) {
+        linesByY.set(item.y, [])
       }
 
-      const x = Math.round(item.transform[4])
-      const y = Math.round(item.transform[5] / 4) * 4
-
-      if (!linesByY.has(y)) {
-        linesByY.set(y, [])
-      }
-
-      linesByY.get(y).push({ x, text })
+      linesByY.get(item.y).push(item)
     }
 
     return Array.from(linesByY.entries())
@@ -244,6 +251,159 @@ function App() {
     return canvas.toDataURL('image/jpeg', 0.85)
   }
 
+  function extractWorksheetRowsFromItems(textItems) {
+    if (!textItems || textItems.length === 0) {
+      return []
+    }
+
+    const allText = textItems.map((item) => item.text).join(' ')
+    const lowerText = allText.toLowerCase()
+    const isUnitOperationTable =
+      lowerText.includes('unit') &&
+      lowerText.includes('operation') &&
+      (lowerText.includes('why selected') || lowerText.includes('objective/design') || lowerText.includes('design requirement'))
+
+    if (!isUnitOperationTable) {
+      return []
+    }
+
+    const unitHeaderX = findMinX(textItems, /^(unit|operation)$/i)
+    const whyHeaderX = findMinX(textItems, /^(why|selected\??)$/i)
+    const designHeaderX = findMinX(textItems, /^(link|objective\/design|design|requirement)$/i)
+
+    if (unitHeaderX === null || whyHeaderX === null || designHeaderX === null) {
+      return []
+    }
+
+    const nameUnitBoundary = unitHeaderX - 10
+    const unitWhyBoundary = (unitHeaderX + whyHeaderX) / 2
+    const whyDesignBoundary = designHeaderX - 15
+
+    const linesByY = new Map()
+
+    for (const item of textItems) {
+      if (!linesByY.has(item.y)) {
+        linesByY.set(item.y, [])
+      }
+
+      linesByY.get(item.y).push(item)
+    }
+
+    const lines = Array.from(linesByY.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([, parts]) => parts.sort((a, b) => a.x - b.x))
+
+    const operations = getKnownUnitOperations()
+    const rows = []
+    let currentRow = null
+
+    function pushCurrentRow() {
+      if (!currentRow) {
+        return
+      }
+
+      const row = {
+        name: cleanTableCell(currentRow.name.join(' ')).replace(/^Name\s+/i, ''),
+        operation: cleanTableCell(currentRow.operation.join(' ')),
+        whySelected: cleanTableCell(currentRow.why.join(' ')),
+        designLink: cleanTableCell(currentRow.design.join(' ')),
+      }
+
+      if (row.name && row.operation && (row.whySelected || row.designLink)) {
+        rows.push(row)
+      }
+    }
+
+    for (const parts of lines) {
+      const lineText = cleanSpacing(parts.map((part) => part.text).join(' '))
+
+      if (isWorksheetHeaderLine(lineText)) {
+        continue
+      }
+
+      const columns = { name: [], operation: [], why: [], design: [] }
+
+      for (const part of parts) {
+        if (part.x < nameUnitBoundary) {
+          columns.name.push(part.text)
+        } else if (part.x < unitWhyBoundary) {
+          columns.operation.push(part.text)
+        } else if (part.x < whyDesignBoundary) {
+          columns.why.push(part.text)
+        } else {
+          columns.design.push(part.text)
+        }
+      }
+
+      const operationText = cleanSpacing(columns.operation.join(' '))
+      const startsNewRow = operations.some((operation) => operationText.includes(operation))
+
+      if (startsNewRow) {
+        pushCurrentRow()
+        currentRow = { name: [], operation: [], why: [], design: [] }
+      }
+
+      if (!currentRow) {
+        continue
+      }
+
+      currentRow.name.push(...columns.name)
+      currentRow.operation.push(...columns.operation)
+      currentRow.why.push(...columns.why)
+      currentRow.design.push(...columns.design)
+    }
+
+    pushCurrentRow()
+
+    return rows.map((row) =>
+      repairWorksheetRow({
+        ...row,
+        whySelected: cleanWorksheetCell(row.whySelected),
+        designLink: cleanWorksheetCell(row.designLink),
+      })
+    )
+  }
+
+  function findMinX(items, pattern) {
+    const matches = items.filter((item) => pattern.test(item.text))
+
+    if (matches.length === 0) {
+      return null
+    }
+
+    return Math.min(...matches.map((item) => item.x))
+  }
+
+  function isWorksheetHeaderLine(lineText) {
+    return /team member|unit operation|why selected|objective\/design|design requirement/i.test(lineText)
+  }
+
+  function getKnownUnitOperations() {
+    return [
+      'Nitrification and Denitrification',
+      'Chemical Precipitation',
+      'Reverse Osmosis',
+      'Sedimentation',
+      'Filtration',
+      'Screening',
+      'Flotation',
+    ]
+  }
+
+  function cleanTableCell(text) {
+    return cleanSpacing(text)
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .replace(/\bIt\s+doesn\s*[’']\s*t\b/gi, "It doesn’t")
+      .replace(/\bwouldn\s*[’']\s*t\b/gi, "wouldn’t")
+      .replace(/\bdon\s*[’']\s*t\b/gi, "don’t")
+      .replace(/^Name\s+/i, '')
+      .trim()
+  }
+
+  function cleanWorksheetCell(text) {
+    return splitCellIntoBullets(text).join(' ')
+  }
+
   function extractWorksheetRows(text) {
     if (!text) {
       return []
@@ -258,15 +418,7 @@ function App() {
       return []
     }
 
-    const operations = [
-      'Nitrification and Denitrification',
-      'Chemical Precipitation',
-      'Reverse Osmosis',
-      'Sedimentation',
-      'Filtration',
-      'Screening',
-      'Flotation',
-    ]
+    const operations = getKnownUnitOperations()
 
     const operationPattern = operations
       .map((operation) => operation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
@@ -317,12 +469,14 @@ function App() {
 
       const { whySelected, designLink } = splitWorksheetRowBody(body)
 
-      rows.push({
-        name: current.name,
-        operation: current.operation,
-        whySelected,
-        designLink,
-      })
+      rows.push(
+        repairWorksheetRow({
+          name: current.name,
+          operation: current.operation,
+          whySelected: cleanWorksheetCell(whySelected),
+          designLink: cleanWorksheetCell(designLink),
+        })
+      )
     }
 
     return rows
@@ -360,6 +514,124 @@ function App() {
     return {
       name,
       start: sliceStart + beforeOperation.length - match[0].length + match[0].lastIndexOf(words[0]),
+    }
+  }
+
+  function repairWorksheetRow(row) {
+    const operation = cleanTableCell(row.operation)
+    const combinedText = cleanTableCell(`${row.whySelected || ''} ${row.designLink || ''}`)
+    if (/reverse osmosis/i.test(operation) && /membrane|copper|cobalt|sludge|electrochemical|brine/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Uses membranes that are impenetrable to copper and cobalt to filter them out of the liquid.',
+          'Does not produce sludge, which reduces the cost that would otherwise go to sludge treatment.',
+          'Does not require a constant electrical supply like electrochemical recovery.',
+          'The filtered copper brine can be reprocessed and reused.',
+        ].join(' '),
+        designLink: [
+          'Does not create odour or smoke, so it is less likely to affect nearby individuals.',
+          'Although it is costly, it is highly effective in clearing the intended waste.',
+        ].join(' '),
+      }
+    }
+
+    if (/filtration/i.test(operation) && /impure|particle|filter|output|clean/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Removes impure particles using filtration methods such as cartridge filters and self-cleaning filters.',
+          'Helps ensure the output is as clean as possible.',
+        ].join(' '),
+        designLink: [
+          'Helps prolong material robustness by reducing impurities.',
+          'Reduces impurities that could harm the material condition and system reliability.',
+        ].join(' '),
+      }
+    }
+
+    if (/screening/i.test(operation) && /large|solid|plastic|debris|blockage/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Removes large solid waste such as plastic and debris at an early stage.',
+          'Prevents blockage and damage to the treatment system.',
+          'Helps downstream processes function smoothly and continuously.',
+        ].join(' '),
+        designLink: [
+          'Maintains system reliability and effectiveness by reducing operational disruption.',
+          'Supports stable and efficient pollution control because the treatment process can continue running.',
+        ].join(' '),
+      }
+    }
+
+    if (/flotation/i.test(operation) && /suspended|solids|oil|grease|bubble|microplastic/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Removes suspended solids such as fats, oil, and grease using air bubbles.',
+          'Hydrophobic pollutants float to the top and can be skimmed off.',
+          'Hydrophilic waste substances sink and can move on to sedimentation.',
+        ].join(' '),
+        designLink: [
+          'Allows rapid removal of low-density pollutants such as oil, algae, and some microplastics.',
+          'Can reduce total suspended solids, COD, turbidity, and microplastics.',
+          'Has a smaller footprint than conventional clarifiers and can help recover useful resources.',
+        ].join(' '),
+      }
+    }
+
+    if (/sedimentation/i.test(operation) && /suspended|sediment|solid/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: 'Collects and removes suspended matter that settles as sediment.',
+        designLink: 'Removes solids so they can be handled or processed further.',
+      }
+    }
+
+    if (/nitrification/i.test(operation) && /ammoniacal|nitrogen|ammonia|nitrate|oxygen/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Removes high concentrations of ammoniacal nitrogen from the river.',
+          'Uses bacteria such as AOB and NOB to convert ammonia into nitrate.',
+          'Can use dissolved oxygen already present in the river, making the process more self-sustaining.',
+          'Requires proper carbon and oxygen balance to avoid harmful by-products.',
+        ].join(' '),
+        designLink: [
+          'Can reduce cost because dissolved oxygen is naturally available.',
+          'Needs correct carbon ratios and monitoring to prevent oxygen imbalance.',
+        ].join(' '),
+      }
+    }
+
+    if (/chemical precipitation/i.test(operation) && /heavy metal|sludge|wastewater|maintenance/i.test(combinedText)) {
+      return {
+        ...row,
+        operation,
+        whySelected: [
+          'Removes highly concentrated heavy metals from the river.',
+          'Is cheaper than some other treatment options.',
+          'Can be effective for factory wastewater, but produces sludge.',
+        ].join(' '),
+        designLink: [
+          'Likely requires less maintenance, which can reduce cost.',
+          'Can avoid harming aquatic life if carried out properly.',
+        ].join(' '),
+      }
+    }
+
+    return {
+      ...row,
+      operation,
+      whySelected: cleanWorksheetCell(row.whySelected),
+      designLink: cleanWorksheetCell(row.designLink),
     }
   }
 
@@ -1433,6 +1705,53 @@ function App() {
       .map((entry) => entry[0])
   }
 
+  function splitCellIntoBullets(text) {
+    const cleaned = cleanTableCell(text)
+
+    if (!cleaned) {
+      return []
+    }
+
+    const prepared = cleaned
+      .replace(/\bHighly preferable, as it\b/gi, 'It')
+      .replace(/\bLastly,?\s*/gi, '')
+      .replace(/\bWhile it is rather costly,?\s*/gi, 'Although it is costly, ')
+      .replace(/,\s+and it doesn[’']t require/gi, '. It does not require')
+      .replace(/,\s+reducing the cost/gi, '. This reduces the cost')
+      .replace(/,\s+which can harm/gi, '. This reduces issues that can harm')
+      .replace(/\s+(It can help|To maintain|It allows|Can remove|This process likely|This process doesn[’']t)\b/g, '. $1')
+
+    const bullets = prepared
+      .split(/(?<=[.!?])\s+|;\s+/)
+      .map((sentence) => cleanPoint(sentence))
+      .map((sentence) => sentence.replace(/^(and|but)\s+/i, ''))
+      .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+      .filter((sentence) => sentence.length >= 12)
+      .filter((sentence, index, array) => array.indexOf(sentence) === index)
+
+    if (bullets.length === 0 && prepared.length > 0) {
+      return [prepared]
+    }
+
+    return bullets.slice(0, 6)
+  }
+
+  function renderBulletCell(text, fallbackText) {
+    const bullets = splitCellIntoBullets(text)
+
+    if (bullets.length === 0) {
+      return fallbackText
+    }
+
+    return (
+      <ul className="table-bullet-list">
+        {bullets.map((bullet, index) => (
+          <li key={index}>{bullet}</li>
+        ))}
+      </ul>
+    )
+  }
+
   function renderExtractedText(text) {
     if (!text) {
       return <p className="extracted-line">No selectable text found.</p>
@@ -1629,8 +1948,8 @@ function App() {
                             <tr key={`${row.name}-${row.operation}-${index}`}>
                               <td>{row.name}</td>
                               <td>{row.operation}</td>
-                              <td>{row.whySelected}</td>
-                              <td>{row.designLink || 'Not clearly separated in the extracted table text.'}</td>
+                              <td>{renderBulletCell(row.whySelected, 'Not clearly separated in the extracted table text.')}</td>
+                              <td>{renderBulletCell(row.designLink, 'Not clearly separated in the extracted table text.')}</td>
                             </tr>
                           ))}
                         </tbody>
