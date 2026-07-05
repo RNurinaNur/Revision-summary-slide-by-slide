@@ -322,3 +322,217 @@ summary {
     width: 100%;
   }
 }
+
+/* ===================== page type + review additions ===================== */
+
+.page-type-badge {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  vertical-align: middle;
+  border: 1px solid transparent;
+}
+
+.type-lecture {
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.type-worksheet {
+  background: rgba(250, 204, 21, 0.12);
+  color: #fde68a;
+  border-color: rgba(250, 204, 21, 0.4);
+}
+
+.type-diagram {
+  background: rgba(168, 85, 247, 0.14);
+  color: #e9d5ff;
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
+.type-ocr-risky {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.type-formula {
+  background: rgba(45, 212, 191, 0.14);
+  color: #99f6e4;
+  border-color: rgba(45, 212, 191, 0.4);
+}
+
+.type-empty {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.warning-banner {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-left: 4px solid #f59e0b;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #fde68a;
+  line-height: 1.55;
+}
+
+.needs-review-label {
+  display: inline-block;
+  margin: 4px 0 10px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ocr-review {
+  margin-top: 14px;
+}
+
+.editable-ocr {
+  width: 100%;
+  margin: 8px 0 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.editable-ocr:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+/* ===================== grouped section cards ===================== */
+
+.group-card .group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.group-header h2 {
+  margin: 0;
+}
+
+.status-pill {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-summary {
+  background: rgba(34, 197, 94, 0.14);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.status-extracted-only {
+  background: rgba(59, 130, 246, 0.14);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.status-needs-review {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+}
+
+.thumb-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.thumb {
+  width: 92px;
+  height: 120px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #020617;
+}
+
+.thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.group-pages {
+  margin-top: 8px;
+}
+
+.group-pages > .slide-card:first-of-type {
+  margin-top: 14px;
+}
+
+/* ===================== final checklist ===================== */
+
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.checklist-bucket {
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+}
+
+.checklist-bucket h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.bucket-pages {
+  margin: 0;
+  color: #dbeafe;
+  line-height: 1.5;
+}
+
+.bucket-pages.muted {
+  color: #64748b;
+}
+
+.bucket-good {
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.bucket-info {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.bucket-warn {
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.bucket-ocr {
+  border-color: rgba(250, 204, 21, 0.4);
+}
