@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { createWorker } from 'tesseract.js'
+import mammoth from 'mammoth/mammoth.browser'
 import './App.css'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
@@ -89,8 +90,12 @@ function App() {
       return
     }
 
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Please upload a PDF file.')
+    const fileName = file.name.toLowerCase()
+    const isPdf = fileName.endsWith('.pdf')
+    const isDocx = fileName.endsWith('.docx')
+
+    if (!isPdf && !isDocx) {
+      alert('Please upload a PDF or DOCX file.')
       return
     }
 
@@ -98,12 +103,12 @@ function App() {
     setSlides([])
     setOverallSummary(null)
     setErrorMessage('')
-    setStatusMessage('PDF selected. Ready to generate notes.')
+    setStatusMessage(file.name.toLowerCase().endsWith('.docx') ? 'DOCX selected. Ready to generate notes.' : 'PDF selected. Ready to generate notes.')
   }
 
   async function handleGenerateNotes() {
     if (!selectedFile) {
-      alert('Please upload a PDF first.')
+      alert('Please upload a PDF or DOCX first.')
       return
     }
 
@@ -111,11 +116,60 @@ function App() {
     setSlides([])
     setOverallSummary(null)
     setErrorMessage('')
-    setStatusMessage('Reading PDF...')
+    setStatusMessage('Reading file...')
 
     let ocrWorker = null
 
     try {
+      const fileName = selectedFile.name.toLowerCase()
+
+      if (fileName.endsWith('.docx')) {
+        setStatusMessage('Reading DOCX file...')
+
+        const docxText = await extractDocxText(selectedFile)
+
+        if (!docxText.trim()) {
+          throw new Error('DOCX file has no readable text.')
+        }
+
+        const seenConceptLabels = new Set()
+        let worksheetRows = extractWorksheetRows(docxText)
+        let keyPoints = worksheetRows.length > 0 ? createWorksheetKeyPoints(worksheetRows) : createKeyPoints(docxText, 1)
+
+        if (keyPoints.length === 0) {
+          keyPoints = createKeyPointsFromProse(docxText)
+        }
+
+        const slideType = worksheetRows.length > 0 ? 'worksheet-table' : detectSlideType(docxText, keyPoints, false)
+        const slideExplanation = createSlideExplanation({
+          text: docxText,
+          keyPoints,
+          slideType,
+          usedOCR: false,
+          seenConceptLabels,
+          worksheetRows,
+        })
+
+        const docxSlide = {
+          pageNumber: 1,
+          text: docxText,
+          imageDataUrl: '',
+          keyPoints,
+          usedOCR: false,
+          sourceType: 'docx',
+          slideType,
+          worksheetRows,
+          slideExplanation,
+        }
+
+        setSlides([docxSlide])
+        setOverallSummary(createOverallSummary(selectedFile.name, [docxSlide]))
+        setStatusMessage('Done. DOCX revision notes generated.')
+        return
+      }
+
+      setStatusMessage('Reading PDF...')
+
       const arrayBuffer = await selectedFile.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 
@@ -188,7 +242,7 @@ function App() {
       setStatusMessage('Done. Revision notes generated.')
     } catch (error) {
       console.error(error)
-      setErrorMessage('Could not read this PDF. Try another PDF with selectable text.')
+      setErrorMessage('Could not read this file. Try a PDF with selectable text or a real .docx file.')
       setStatusMessage('')
     } finally {
       if (ocrWorker) {
@@ -197,6 +251,16 @@ function App() {
 
       setIsLoading(false)
     }
+  }
+
+  async function extractDocxText(file) {
+    const arrayBuffer = await file.arrayBuffer()
+    const result = await mammoth.extractRawText({ arrayBuffer })
+
+    return result.value
+      .replace(/\r/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
   }
 
   async function extractPageTextItems(page) {
@@ -1821,14 +1885,14 @@ function App() {
         <h1>Study Sprint</h1>
 
         <p className="subtitle">
-          Turn PDF lecture slides into slide-by-slide revision notes, explanations, and study checklists.
+          Turn PDF or DOCX lecture notes into revision notes, explanations, and study checklists.
         </p>
 
         <div className="upload-box">
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={handleFileChange}
           />
 
@@ -1855,7 +1919,7 @@ function App() {
         <section className="card">
           <h2>Overall Revision Summary</h2>
           <p className="summary-meta">Revision summary for {overallSummary.fileName}</p>
-          <p className="summary-meta">Total slides/pages: {overallSummary.totalPages}</p>
+          <p className="summary-meta">Total sections/pages: {overallSummary.totalPages}</p>
 
           <div className="summary-section">
             <h3>Main Keywords</h3>
@@ -1887,7 +1951,7 @@ function App() {
           </div>
 
           <p className="summary-note">
-            This is a free local summary. It extracts text from the PDF and creates rule-based notes without using
+            This is a free local summary. It extracts text from PDF/DOCX files and creates rule-based notes without using
             an AI API.
           </p>
         </section>
@@ -1898,17 +1962,19 @@ function App() {
           <h2>Slide-by-Slide Notes</h2>
 
           {slides.map((slide) => (
-            <article className="slide-card" key={slide.pageNumber}>
+            <article className="slide-card" key={`${slide.sourceType || 'pdf'}-${slide.pageNumber}`}>
               <h3>
-                Slide/Page {slide.pageNumber}
+                {slide.sourceType === 'docx' ? 'DOCX Section' : `Slide/Page ${slide.pageNumber}`}
                 {slide.usedOCR && <span className="ocr-badge">OCR</span>}
               </h3>
 
-              <img
-                className="slide-preview"
-                src={slide.imageDataUrl}
-                alt={`Slide/Page ${slide.pageNumber}`}
-              />
+              {slide.imageDataUrl && (
+                <img
+                  className="slide-preview"
+                  src={slide.imageDataUrl}
+                  alt={`Slide/Page ${slide.pageNumber}`}
+                />
+              )}
 
               <div className="key-points">
                 <h4>Key Points</h4>
