@@ -133,14 +133,23 @@ function App() {
         }
 
         const seenConceptLabels = new Set()
-        let worksheetRows = extractWorksheetRows(docxText)
-        let keyPoints = worksheetRows.length > 0 ? createWorksheetKeyPoints(worksheetRows) : createKeyPoints(docxText, 1)
+        const technologyRows = extractTechnologyRows(docxText)
+        let worksheetRows = technologyRows.length > 0 ? [] : extractWorksheetRows(docxText)
+        let keyPoints = technologyRows.length > 0
+          ? createTechnologyKeyPoints(technologyRows)
+          : worksheetRows.length > 0
+            ? createWorksheetKeyPoints(worksheetRows)
+            : createKeyPoints(docxText, 1)
 
         if (keyPoints.length === 0) {
           keyPoints = createKeyPointsFromProse(docxText)
         }
 
-        const slideType = worksheetRows.length > 0 ? 'worksheet-table' : detectSlideType(docxText, keyPoints, false)
+        const slideType = technologyRows.length > 0
+          ? 'technology-table'
+          : worksheetRows.length > 0
+            ? 'worksheet-table'
+            : detectSlideType(docxText, keyPoints, false)
         const slideExplanation = createSlideExplanation({
           text: docxText,
           keyPoints,
@@ -148,6 +157,7 @@ function App() {
           usedOCR: false,
           seenConceptLabels,
           worksheetRows,
+          technologyRows,
         })
 
         const docxSlide = {
@@ -159,6 +169,7 @@ function App() {
           sourceType: 'docx',
           slideType,
           worksheetRows,
+          technologyRows,
           slideExplanation,
         }
 
@@ -204,18 +215,27 @@ function App() {
           usedOCR = true
         }
 
-        let worksheetRows = extractWorksheetRowsFromItems(textItems)
+        const technologyRows = extractTechnologyRowsFromItems(textItems)
+        let worksheetRows = technologyRows.length > 0 ? [] : extractWorksheetRowsFromItems(textItems)
 
-        if (worksheetRows.length === 0) {
+        if (technologyRows.length === 0 && worksheetRows.length === 0) {
           worksheetRows = extractWorksheetRows(text)
         }
-        let keyPoints = worksheetRows.length > 0 ? createWorksheetKeyPoints(worksheetRows) : []
+        let keyPoints = technologyRows.length > 0
+          ? createTechnologyKeyPoints(technologyRows)
+          : worksheetRows.length > 0
+            ? createWorksheetKeyPoints(worksheetRows)
+            : []
 
         if (keyPoints.length === 0) {
           keyPoints = usedOCR ? createKeyPointsFromProse(text) : createKeyPoints(text, pageNumber)
         }
 
-        const slideType = worksheetRows.length > 0 ? 'worksheet-table' : detectSlideType(text, keyPoints, usedOCR)
+        const slideType = technologyRows.length > 0
+          ? 'technology-table'
+          : worksheetRows.length > 0
+            ? 'worksheet-table'
+            : detectSlideType(text, keyPoints, usedOCR)
         const slideExplanation = createSlideExplanation({
           text,
           keyPoints,
@@ -223,6 +243,7 @@ function App() {
           usedOCR,
           seenConceptLabels,
           worksheetRows,
+          technologyRows,
         })
 
         extractedSlides.push({
@@ -233,6 +254,7 @@ function App() {
           usedOCR,
           slideType,
           worksheetRows,
+          technologyRows,
           slideExplanation,
         })
       }
@@ -428,6 +450,188 @@ function App() {
     )
   }
 
+  function extractTechnologyRowsFromItems(textItems) {
+    if (!textItems || textItems.length === 0) {
+      return []
+    }
+
+    const allText = cleanSpacing(textItems.map((item) => item.text).join(' '))
+    const lowerText = allText.toLowerCase()
+    const hasTechnologyTableSignal =
+      lowerText.includes('option 1') &&
+      lowerText.includes('option 2') &&
+      (lowerText.includes('option 3') || lowerText.includes('selected')) &&
+      lowerText.includes('unit operation')
+    const hasContinuationSignal =
+      lowerText.includes('option') ||
+      getTechnologyUnitOperations().some((operation) => lowerText.includes(operation.toLowerCase()))
+
+    if (!hasTechnologyTableSignal && !hasContinuationSignal) {
+      return []
+    }
+
+    const linesByY = new Map()
+
+    for (const item of textItems) {
+      if (!linesByY.has(item.y)) {
+        linesByY.set(item.y, [])
+      }
+
+      linesByY.get(item.y).push(item)
+    }
+
+    const lines = Array.from(linesByY.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([, parts]) => parts.sort((a, b) => a.x - b.x))
+
+    const option1X = findMinX(textItems, /^option$/i)
+    const optionStarts = textItems
+      .filter((item) => /^option$/i.test(item.text))
+      .map((item) => item.x)
+      .sort((a, b) => a - b)
+
+    const boundaries = optionStarts.length >= 3
+      ? {
+          nameOperation: Math.max(62, optionStarts[0] - 58),
+          operationOption1: Math.max(120, optionStarts[0] - 10),
+          option1Option2: (optionStarts[0] + optionStarts[1]) / 2,
+          option2Option3: (optionStarts[1] + optionStarts[2]) / 2,
+          option3Selected: optionStarts[2] + 105,
+        }
+      : {
+          nameOperation: 74,
+          operationOption1: option1X ? Math.max(120, option1X - 10) : 145,
+          option1Option2: 255,
+          option2Option3: 365,
+          option3Selected: 474,
+        }
+
+    const rows = []
+    let currentRow = null
+
+    function pushCurrentRow() {
+      if (!currentRow) {
+        return
+      }
+
+      const row = repairTechnologyRow({
+        name: cleanPersonName(currentRow.name.join(' ')),
+        operation: cleanTableCell(currentRow.operation.join(' ')),
+        option1: cleanTableCell(currentRow.option1.join(' ')),
+        option2: cleanTableCell(currentRow.option2.join(' ')),
+        option3: cleanTableCell(currentRow.option3.join(' ')),
+        selected: cleanTableCell(currentRow.selected.join(' ')),
+      })
+
+      if (row.operation && (row.option1 || row.option2 || row.option3 || row.selected)) {
+        rows.push(row)
+      }
+    }
+
+    for (const parts of lines) {
+      const lineText = cleanSpacing(parts.map((part) => part.text).join(' '))
+
+      if (isTechnologyHeaderLine(lineText) || /^task\s+2\b/i.test(lineText)) {
+        continue
+      }
+
+      const columns = { name: [], operation: [], option1: [], option2: [], option3: [], selected: [] }
+
+      for (const part of parts) {
+        if (part.x < boundaries.nameOperation) {
+          columns.name.push(part.text)
+        } else if (part.x < boundaries.operationOption1) {
+          columns.operation.push(part.text)
+        } else if (part.x < boundaries.option1Option2) {
+          columns.option1.push(part.text)
+        } else if (part.x < boundaries.option2Option3) {
+          columns.option2.push(part.text)
+        } else if (part.x < boundaries.option3Selected) {
+          columns.option3.push(part.text)
+        } else {
+          columns.selected.push(part.text)
+        }
+      }
+
+      const operationText = cleanSpacing(columns.operation.join(' '))
+      const startsNewRow = isTechnologyOperationStart(operationText, columns.name.join(' '))
+
+      if (startsNewRow) {
+        pushCurrentRow()
+        currentRow = { name: [], operation: [], option1: [], option2: [], option3: [], selected: [] }
+      }
+
+      if (!currentRow) {
+        continue
+      }
+
+      currentRow.name.push(...columns.name)
+      currentRow.operation.push(...columns.operation)
+      currentRow.option1.push(...columns.option1)
+      currentRow.option2.push(...columns.option2)
+      currentRow.option3.push(...columns.option3)
+      currentRow.selected.push(...columns.selected)
+    }
+
+    pushCurrentRow()
+
+    return rows
+  }
+
+  function extractTechnologyRows(text) {
+    if (!text) {
+      return []
+    }
+
+    const lowerText = text.toLowerCase()
+
+    if (!lowerText.includes('option 1') || !lowerText.includes('option 2') || !lowerText.includes('selected')) {
+      return []
+    }
+
+    const lines = text.split('\n').map(cleanSpacing).filter(Boolean)
+    const rows = []
+    let currentRow = null
+    const operationPattern = new RegExp(`\\b(${getTechnologyUnitOperations().map(escapeRegex).join('|')})\\b`, 'i')
+
+    function pushCurrentRow() {
+      if (currentRow?.operation) {
+        rows.push(repairTechnologyRow(currentRow))
+      }
+    }
+
+    for (const line of lines) {
+      if (isTechnologyHeaderLine(line) || /^task\s+2\b/i.test(line)) {
+        continue
+      }
+
+      const match = line.match(operationPattern)
+
+      if (match) {
+        pushCurrentRow()
+        const before = cleanSpacing(line.slice(0, match.index))
+        const after = cleanSpacing(line.slice(match.index + match[0].length))
+        currentRow = {
+          name: cleanPersonName(before),
+          operation: match[0],
+          option1: after,
+          option2: '',
+          option3: '',
+          selected: '',
+        }
+        continue
+      }
+
+      if (currentRow) {
+        currentRow.option1 = cleanSpacing(`${currentRow.option1} ${line}`)
+      }
+    }
+
+    pushCurrentRow()
+
+    return rows
+  }
+
   function findMinX(items, pattern) {
     const matches = items.filter((item) => pattern.test(item.text))
 
@@ -442,6 +646,10 @@ function App() {
     return /team member|unit operation|why selected|objective\/design|design requirement/i.test(lineText)
   }
 
+  function isTechnologyHeaderLine(lineText) {
+    return /team\s+member|unit\s+operation|option\s+[123]|which\s+option|brief\s+explanation|optional/i.test(lineText)
+  }
+
   function getKnownUnitOperations() {
     return [
       'Nitrification and Denitrification',
@@ -452,6 +660,48 @@ function App() {
       'Screening',
       'Flotation',
     ]
+  }
+
+  function getTechnologyUnitOperations() {
+    return [
+      'Nitrification and Denitrification',
+      'Disinfection/pH adjustment',
+      'Chemical Precipitation',
+      'Reverse Osmosis',
+      'Nanofiltration',
+      'Sedimentation',
+      'Floatation',
+      'Flotation',
+      'Screening',
+      'Aeration',
+      'Chemical',
+    ]
+  }
+
+  function escapeRegex(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  function isTechnologyOperationStart(operationText, nameText) {
+    const cleanedOperation = cleanSpacing(operationText)
+    const cleanedName = cleanSpacing(nameText)
+
+    if (!cleanedOperation || isTechnologyHeaderLine(cleanedOperation)) {
+      return false
+    }
+
+    const exactOperations = getTechnologyUnitOperations().filter((operation) => operation !== 'Chemical')
+    const hasKnownOperation = exactOperations.some((operation) => cleanedOperation.includes(operation))
+    const hasPartialChemical = /^Chemical$/i.test(cleanedOperation) && cleanedName.length > 0
+
+    return hasKnownOperation || hasPartialChemical
+  }
+
+  function cleanPersonName(text) {
+    return cleanTableCell(text)
+      .replace(/\b(Member|Team|Name)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
   }
 
   function cleanTableCell(text) {
@@ -699,6 +949,24 @@ function App() {
     }
   }
 
+  function repairTechnologyRow(row) {
+    const cleaned = {
+      name: cleanPersonName(row.name || ''),
+      operation: cleanTableCell(row.operation || ''),
+      option1: cleanTableCell(row.option1 || ''),
+      option2: cleanTableCell(row.option2 || ''),
+      option3: cleanTableCell(row.option3 || ''),
+      selected: cleanTableCell(row.selected || ''),
+    }
+
+    if (/^Chemical$/i.test(cleaned.operation) && /precipitation/i.test(cleaned.option1)) {
+      cleaned.operation = 'Chemical Precipitation'
+      cleaned.option1 = cleaned.option1.replace(/^Precipitation\s+/i, '')
+    }
+
+    return cleaned
+  }
+
   function splitWorksheetRowBody(body) {
     const cleanedBody = cleanSpacing(body)
 
@@ -764,6 +1032,25 @@ function App() {
       `This worksheet table lists ${rows.length} proposed unit operation${rows.length === 1 ? '' : 's'}.`,
       `Main operation${rows.length === 1 ? '' : 's'} shown: ${operationList}.`,
       'Use the table summary below instead of reading the row as broken bullet points.',
+    ]
+  }
+
+  function createTechnologyKeyPoints(rows) {
+    if (rows.length === 0) {
+      return []
+    }
+
+    const operations = rows
+      .map((row) => row.operation)
+      .filter((operation, index, array) => operation && array.indexOf(operation) === index)
+      .slice(0, 5)
+      .join(', ')
+
+    return [
+      `This Task 2 table compares alternative technologies for ${rows.length} unit operation${rows.length === 1 ? '' : 's'}.`,
+      `Main operation${rows.length === 1 ? '' : 's'} shown: ${operations}.`,
+      'Read across each row: Option 1, Option 2, Option 3, then the selected option and reason.',
+      'Focus on distinguishing features such as cost, energy use, clogging risk, maintenance, flow handling, footprint, and reliability.',
     ]
   }
 
@@ -833,7 +1120,20 @@ function App() {
     return 'concept'
   }
 
-  function createSlideExplanation({ text, keyPoints, slideType, usedOCR, seenConceptLabels, worksheetRows = [] }) {
+  function createSlideExplanation({ text, keyPoints, slideType, usedOCR, seenConceptLabels, worksheetRows = [], technologyRows = [] }) {
+    if (slideType === 'technology-table') {
+      return {
+        title: 'Technology Options Table',
+        bullets: [
+          'This page is a technology comparison table, so the app keeps each unit operation row together.',
+          'Each option cell is split into readable feature bullets instead of being treated as code or one broken paragraph.',
+        ],
+        formulas: [],
+        concepts: [],
+        technologyRows,
+      }
+    }
+
     if (slideType === 'worksheet-table') {
       return {
         title: 'Worksheet / Table Summary',
@@ -2016,6 +2316,35 @@ function App() {
                               <td>{row.operation}</td>
                               <td>{renderBulletCell(row.whySelected, 'Not clearly separated in the extracted table text.')}</td>
                               <td>{renderBulletCell(row.designLink, 'Not clearly separated in the extracted table text.')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {slide.slideExplanation.technologyRows?.length > 0 && (
+                    <div className="worksheet-table-wrap">
+                      <table className="worksheet-summary-table technology-options-table">
+                        <thead>
+                          <tr>
+                            <th>Team member</th>
+                            <th>Unit operation</th>
+                            <th>Option 1: key features</th>
+                            <th>Option 2: key features</th>
+                            <th>Option 3: key features</th>
+                            <th>Selected option</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {slide.slideExplanation.technologyRows.map((row, index) => (
+                            <tr key={`${row.name}-${row.operation}-${index}`}>
+                              <td>{row.name || 'Not separated'}</td>
+                              <td>{row.operation}</td>
+                              <td>{renderBulletCell(row.option1, 'No Option 1 text separated from the PDF table.')}</td>
+                              <td>{renderBulletCell(row.option2, 'No Option 2 text separated from the PDF table.')}</td>
+                              <td>{renderBulletCell(row.option3, 'No Option 3 text separated from the PDF table.')}</td>
+                              <td>{renderBulletCell(row.selected, 'Selected option not clearly separated from the PDF table.')}</td>
                             </tr>
                           ))}
                         </tbody>

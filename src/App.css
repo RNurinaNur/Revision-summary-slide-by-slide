@@ -422,6 +422,34 @@ summary {
   color: #e5e7eb;
 }
 
+.technology-options-table {
+  min-width: 1180px;
+}
+
+.technology-options-table th:nth-child(1),
+.technology-options-table td:nth-child(1) {
+  width: 110px;
+}
+
+.technology-options-table th:nth-child(2),
+.technology-options-table td:nth-child(2) {
+  width: 140px;
+}
+
+.technology-options-table th:nth-child(3),
+.technology-options-table td:nth-child(3),
+.technology-options-table th:nth-child(4),
+.technology-options-table td:nth-child(4),
+.technology-options-table th:nth-child(5),
+.technology-options-table td:nth-child(5) {
+  width: 225px;
+}
+
+.technology-options-table th:nth-child(6),
+.technology-options-table td:nth-child(6) {
+  width: 255px;
+}
+
 .table-bullet-list {
   margin: 0;
   padding-left: 18px;
