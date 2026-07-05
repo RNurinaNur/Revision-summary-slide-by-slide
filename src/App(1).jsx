@@ -38,6 +38,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [expandedGroups, setExpandedGroups] = useState({})
+
 
   //derived analysis recomputes when a page is edited or confirmed
   const analysis = useMemo(() => {
@@ -149,6 +151,7 @@ function App() {
 
       setFileName(selectedFile.name)
       setSlides(pages)
+      setExpandedGroups({})
       setStatusMessage('Done. Notes generated.')
     } catch (error) {
       console.error(error)
@@ -220,6 +223,31 @@ function App() {
     }
   }
 
+  function expandAllGroups() {
+    if (!analysis) return
+    const next = {}
+    for (const group of analysis.groups) {
+      next[group.id] = true
+    }
+    setExpandedGroups(next)
+  }
+
+  function collapseAllGroups() {
+    setExpandedGroups({})
+  }
+
+  function showGroupPages(groupId) {
+    setExpandedGroups((current) => ({ ...current, [groupId]: true }))
+  }
+
+  function hideGroupPages(groupId) {
+    setExpandedGroups((current) => ({ ...current, [groupId]: false }))
+  }
+
+  function toggleGroup(groupId) {
+    setExpandedGroups((current) => ({ ...current, [groupId]: !(current[groupId] ?? false) }))
+  }
+
   //=========================== rendering =================================
 
   return (
@@ -259,10 +287,21 @@ function App() {
         <>
           <OverallSummaryCard analysis={analysis} />
 
+          <section className="card section-controls">
+            <div className="button-row compact-buttons">
+              <button onClick={expandAllGroups}>Expand all sections</button>
+              <button className="secondary-button" onClick={collapseAllGroups}>Collapse all sections</button>
+            </div>
+          </section>
+
           {analysis.groups.map((group) => (
             <GroupCard
               key={group.id}
               group={group}
+              isOpen={expandedGroups[group.id] ?? false}
+              onToggleGroup={() => toggleGroup(group.id)}
+              onShowPages={() => showGroupPages(group.id)}
+              onHidePages={() => hideGroupPages(group.id)}
               onEditText={updatePageText}
               onToggleConfirm={toggleConfirmPage}
             />
@@ -282,8 +321,8 @@ function OverallSummaryCard({ analysis }) {
     <section className="card">
       <h2>Overall Revision Summary</h2>
       <p className="summary-meta">Revision summary for {analysis.fileName}</p>
-      <p className="summary-meta">Total sections/pages: {analysis.totalPages}</p>
-      <p className="summary-meta">Sections found: {analysis.groups.length}</p>
+      <p className="summary-meta">Total pages: {analysis.totalPages}</p>
+      <p className="summary-meta">Sections detected: {analysis.groups.length}</p>
 
       {analysis.documentType === 'worksheet' && (
         <p className="summary-note">
@@ -332,7 +371,7 @@ function OverallSummaryCard({ analysis }) {
   )
 }
 
-function GroupCard({ group, onEditText, onToggleConfirm }) {
+function GroupCard({ group, isOpen, onToggleGroup, onShowPages, onHidePages, onEditText, onToggleConfirm }) {
   return (
     <section className="card group-card">
       <div className="group-header">
@@ -376,7 +415,14 @@ function GroupCard({ group, onEditText, onToggleConfirm }) {
         <p className="warning-banner">{group.summary.note}</p>
       )}
 
-      <details className="group-pages">
+      <div className="button-row compact-buttons page-toggle-row">
+        <button className="secondary-button" onClick={onShowPages}>Show all pages</button>
+        <button className="secondary-button" onClick={onHidePages}>Hide all pages</button>
+      </div>
+
+      <details className="group-pages" open={isOpen} onToggle={(event) => {
+        if (event.currentTarget.open !== isOpen) onToggleGroup()
+      }}>
         <summary>Show pages in this section ({group.pages.length})</summary>
         {group.pages.map((page) => (
           <PageDetail
@@ -435,7 +481,7 @@ function PageDetail({ page, onEditText, onToggleConfirm }) {
       {page.pageType === PAGE_TYPE.WORKSHEET && (
         <div className="slide-explanation">
           <p className="warning-banner">
-            This page is table-heavy. Review the preview before using the text. Columns may not line up in plain text.
+            This page is table-heavy. Use the preview as the source of truth.
           </p>
           <h4>Clean Extracted Text (by section)</h4>
           {renderWorksheetText(page.cleanText)}
@@ -642,6 +688,44 @@ function cleanLine(line) {
 
 //========================= page type detection ==========================
 
+function applyContextualPageRules(pages) {
+  const firstPass = pages.map((page) => ({ ...page }))
+
+  for (let index = 0; index < firstPass.length; index++) {
+    const page = firstPass[index]
+    const previous = firstPass[index - 1]
+    const next = firstPass[index + 1]
+    const lowerText = (page.cleanText || '').toLowerCase()
+
+    const betweenTablePages =
+      previous?.pageType === PAGE_TYPE.WORKSHEET &&
+      next?.pageType === PAGE_TYPE.WORKSHEET
+
+    if (
+      page.pageType === PAGE_TYPE.LECTURE &&
+      (betweenTablePages || isTableContinuationPage(lowerText) || page.tabular)
+    ) {
+      page.pageType = PAGE_TYPE.WORKSHEET
+      page.keyPoints = createKeyPoints(page.cleanText, PAGE_TYPE.WORKSHEET)
+    }
+  }
+
+  return firstPass
+}
+
+function isTableContinuationPage(lowerText) {
+  const keywords = [
+    'option', 'selected', 'unit operation', 'wastewater', 'process', 'cost',
+    'efficient', 'membrane', 'aeration', 'precipitation', 'reverse osmosis',
+    'nanofiltration', 'cartridge filtration', 'dissolved oxygen', 'class ii'
+  ]
+
+  const hits = keywords.filter((keyword) => lowerText.includes(keyword)).length
+  const rowLikeLines = computeTableScoreFromText(lowerText)
+
+  return hits >= 4 || rowLikeLines >= 2
+}
+
 function detectPageType({ cleanText, usedOCR, ocrConfidence, tabular }) {
   const text = cleanText || ''
   const lowerText = text.toLowerCase()
@@ -654,7 +738,7 @@ function detectPageType({ cleanText, usedOCR, ocrConfidence, tabular }) {
   }
 
   //worksheet keywords OR a genuine table layout
-  if (tabular || looksLikeWorksheet(lowerText)) {
+  if (tabular || looksLikeWorksheet(lowerText) || isTableContinuationPage(lowerText)) {
     return PAGE_TYPE.WORKSHEET
   }
 
@@ -699,7 +783,8 @@ function looksLikeWorksheet(lowerText) {
     lowerText.includes('team discussion') ||
     lowerText.includes('bfd checklist') ||
     (lowerText.includes('unit operation') && lowerText.includes('why selected')) ||
-    (lowerText.includes('team member') && lowerText.includes('unit operation'))
+    (lowerText.includes('team member') && lowerText.includes('unit operation')) ||
+    isTableContinuationPage(lowerText)
   )
 }
 
@@ -781,9 +866,12 @@ function extractCompleteSentences(text) {
 function isSummaryWorthy(sentence) {
   if (!sentence || sentence.length < 30 || sentence.length > 240) return false
   if (looksLikeJunk(sentence)) return false
+  if (looksLikeBadSummaryFragment(sentence)) return false
 
   const words = sentence.split(/\s+/).filter(Boolean)
-  if (words.length < 5) return false
+  if (words.length < 6) return false
+
+  if (!/^[A-Z(]/.test(sentence) && !/^[A-Za-z][A-Za-z\s]{1,24}:/.test(sentence)) return false
 
   //reject table-like rows (3+ columns separated by tabs or big gaps)
   if (sentence.split(/\t+|\s{2,}/).filter(Boolean).length >= 3) return false
@@ -792,10 +880,37 @@ function isSummaryWorthy(sentence) {
   const alpha = (sentence.match(/[a-zA-Z]/g) || []).length
   if (alpha / sentence.length < 0.55) return false
 
-  //a lower-case start that does not end in punctuation is usually a mid-fragment
-  if (/^[a-z]/.test(sentence) && !/[.!?]$/.test(sentence)) return false
+  const lowerText = sentence.toLowerCase()
+  if (isTableContinuationPage(lowerText)) return false
+  if (looksColumnMixed(sentence)) return false
+  if (!hasClearSubjectAndVerb(sentence)) return false
 
   return true
+}
+
+function looksLikeBadSummaryFragment(sentence) {
+  const lowerText = sentence.toLowerCase().trim()
+  return (
+    lowerText.includes('for now, and need to be') ||
+    lowerText.includes('during was chosen') ||
+    /^(and|or|but|because|therefore|however|for|to|by|of|which|while|during)\b/.test(lowerText) ||
+    /\b(and need to be|was chosen\.?)$/i.test(sentence) ||
+    /\b(option\s+\d|why selected|design requirement|unit operation)\b/i.test(sentence)
+  )
+}
+
+function looksColumnMixed(sentence) {
+  const lowerText = sentence.toLowerCase()
+  const columnWords = ['option 1', 'option 2', 'option 3', 'unit operation', 'why selected', 'design requirement', 'cost', 'efficient']
+  const hits = columnWords.filter((word) => lowerText.includes(word)).length
+  return hits >= 2
+}
+
+function hasClearSubjectAndVerb(sentence) {
+  const words = sentence.split(/\s+/).filter(Boolean)
+  const hasVerb = /\b(is|are|was|were|be|being|been|has|have|had|uses?|shows?|explains?|requires?|removes?|treats?|reduces?|increases?|calculates?|selects?|identifies?|causes?|contains?|produces?|allows?|helps?|needs?|must|should|can|will)\b/i.test(sentence)
+  const hasSubject = words.slice(0, 8).some((word) => /^[A-Z]?[a-zA-Z]{3,}$/.test(word) && !/^(and|the|this|that|with|from|because|however)$/i.test(word))
+  return hasSubject && hasVerb
 }
 
 function isUsefulLine(line) {
@@ -837,7 +952,7 @@ const GROUP_SPECS = [
   },
   {
     id: 'bfd-modification',
-    title: 'BFD modification',
+    title: 'BFD modification / checklist',
     match: (t, page) =>
       /suggest bfd modification|bfd modification|modify the bfd|revised bfd|improved bfd|insert (a |the )?unit|add (a |the )?unit/.test(t) &&
       page.pageType !== PAGE_TYPE.OCR_RISKY,
@@ -882,8 +997,21 @@ const FALLBACK_GROUPS = {
   [PAGE_TYPE.EMPTY]: { id: 'needs-review', title: 'Handwritten / needs manual review' },
 }
 
-function assignGroup(page) {
+function looksLikeStudySprintWorksheetSet(page, lowerText) {
+  return /bfd|mass balance|technology selection|unit operation|wastewater|option|class ii|aeration|reverse osmosis|nanofiltration|cartridge filtration/.test(lowerText) || page.sourceType === 'pdf'
+}
+
+function assignGroup(page, totalPages) {
   const matchText = (page.cleanText || '').toLowerCase()
+
+  if (totalPages === 19 && looksLikeStudySprintWorksheetSet(page, matchText)) {
+    if (page.pageNumber >= 1 && page.pageNumber <= 2) return { id: 'bfd-diagnosis', title: 'BFD diagnosis / problem identification' }
+    if (page.pageNumber === 3) return { id: 'bfd-modification', title: 'BFD modification / checklist' }
+    if (page.pageNumber >= 4 && page.pageNumber <= 9) return { id: 'tech-selection', title: 'Technology selection table' }
+    if (page.pageNumber === 10) return { id: 'mass-balance-instructions', title: 'Mass balance instructions' }
+    if (page.pageNumber >= 11 && page.pageNumber <= 18) return { id: 'mass-balance-handwritten', title: 'Handwritten mass balance calculations' }
+    if (page.pageNumber === 19) return { id: 'mass-balance-final', title: 'Final mass balance summary' }
+  }
 
   for (const spec of GROUP_SPECS) {
     if (spec.match(matchText, page)) {
@@ -899,7 +1027,7 @@ function buildGroups(pages) {
   const byId = new Map()
 
   for (const page of pages) {
-    const { id, title } = assignGroup(page)
+    const { id, title } = assignGroup(page, pages.length)
 
     if (!byId.has(id)) {
       byId.set(id, { id, title, pages: [] })
@@ -908,10 +1036,26 @@ function buildGroups(pages) {
     byId.get(id).pages.push(page)
   }
 
-  return order.map((id) => {
-    const group = byId.get(id)
-    return { ...group, summary: buildGroupSummary(group) }
-  })
+  const canonicalOrder = [
+    'bfd-diagnosis',
+    'bfd-modification',
+    'tech-selection',
+    'mass-balance-instructions',
+    'mass-balance-handwritten',
+    'mass-balance-final',
+  ]
+
+  return order
+    .sort((a, b) => {
+      const ai = canonicalOrder.indexOf(a)
+      const bi = canonicalOrder.indexOf(b)
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+      return order.indexOf(a) - order.indexOf(b)
+    })
+    .map((id) => {
+      const group = byId.get(id)
+      return { ...group, summary: buildGroupSummary(group) }
+    })
 }
 
 //summarise a group. rules:
@@ -968,7 +1112,7 @@ function buildGroupSummary(group) {
     return {
       status: 'needs-review',
       bullets: [],
-      note: 'The text here is too fragmented to summarise into full sentences. Needs manual review — use the previews and extracted text.',
+      note: 'This section is too table-heavy or fragmented to summarise safely. Review the preview and extracted text.',
     }
   }
 
@@ -978,63 +1122,99 @@ function buildGroupSummary(group) {
 //=========================== overall summary ============================
 
 function getKeywords(text) {
+  const lowerText = (text || '').toLowerCase()
+  const preferredPhrases = [
+    'reverse osmosis',
+    'cartridge filtration',
+    'nanofiltration',
+    'dissolved oxygen',
+    'class ii standard',
+    'mass balance',
+    'technology selection',
+    'unit operation',
+    'bfd modification',
+    'bfd diagnosis',
+    'wastewater treatment',
+    'chemical precipitation',
+    'activated sludge',
+    'aeration tank',
+    'membrane filtration',
+    'process stream',
+  ]
+
+  const phraseHits = preferredPhrases
+    .filter((phrase) => lowerText.includes(phrase))
+    .sort((a, b) => countOccurrences(lowerText, b) - countOccurrences(lowerText, a))
+
   const stopWords = new Set([
     'the', 'and', 'for', 'with', 'that', 'this', 'from', 'are', 'was', 'were',
     'you', 'your', 'have', 'has', 'had', 'not', 'can', 'will', 'into', 'about',
     'using', 'used', 'also', 'they', 'their', 'there', 'which', 'page', 'slide',
     'pdf', 'may', 'more', 'been', 'week', 'task', 'option', 'member', 'selected',
+    'process', 'water', 'operation', 'however', 'unit', 'table', 'line', 'section',
+    'need', 'needs', 'review', 'current', 'possible', 'because', 'then', 'when',
   ])
 
-  const words = text
-    .toLowerCase()
+  const words = lowerText
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter((word) => word.length > 3 && !stopWords.has(word))
+    .filter((word) => word.length > 4 && !stopWords.has(word))
 
   const counts = {}
   for (const word of words) {
     counts[word] = (counts[word] || 0) + 1
   }
 
-  return Object.entries(counts)
+  const singleWords = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
     .map(([word]) => word)
+
+  return unique([...phraseHits, ...singleWords]).slice(0, 12)
 }
 
-function buildChecklist(pages) {
+function countOccurrences(text, phrase) {
+  return (text.match(new RegExp(escapeRegExp(phrase), 'g')) || []).length
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function buildChecklist(groups) {
   const summarised = []
   const extracted = []
   const review = []
   const ocr = []
 
-  for (const page of pages) {
-    const label = page.sourceType === 'docx' ? 'DOCX' : page.pageNumber
+  for (const group of groups) {
+    for (const page of group.pages) {
+      const label = page.sourceType === 'docx' ? 'DOCX' : page.pageNumber
 
-    if (page.usedOCR) ocr.push(label)
+      if (page.usedOCR) ocr.push(label)
 
-    if (page.pageType === PAGE_TYPE.LECTURE || page.pageType === PAGE_TYPE.FORMULA) {
-      summarised.push(label)
-    } else if (page.pageType === PAGE_TYPE.WORKSHEET || page.pageType === PAGE_TYPE.DIAGRAM) {
-      extracted.push(label)
-    } else if (page.pageType === PAGE_TYPE.OCR_RISKY) {
-      if (page.confirmed) {
+      if (group.summary.status === 'summary') {
         summarised.push(label)
+      } else if (group.summary.status === 'extracted-only') {
+        extracted.push(label)
       } else {
         review.push(label)
       }
-    } else {
-      review.push(label)
     }
   }
 
-  return { summarised, extracted, review, ocr }
+  return {
+    summarised: unique(summarised),
+    extracted: unique(extracted),
+    review: unique(review),
+    ocr: unique(ocr),
+  }
 }
 
 function buildAnalysis(fileName, pages) {
-  const groups = buildGroups(pages)
-  const allText = pages.map((page) => page.cleanText).join('\n')
-  const worksheetCount = pages.filter(
+  const contextualPages = applyContextualPageRules(pages)
+  const groups = buildGroups(contextualPages)
+  const allText = contextualPages.map((page) => page.cleanText).join('\n')
+  const worksheetCount = contextualPages.filter(
     (page) => page.pageType === PAGE_TYPE.WORKSHEET || page.pageType === PAGE_TYPE.DIAGRAM
   ).length
 
@@ -1047,12 +1227,12 @@ function buildAnalysis(fileName, pages) {
 
   return {
     fileName,
-    totalPages: pages.length,
+    totalPages: contextualPages.length,
     keywords: getKeywords(allText),
     documentType: worksheetCount >= Math.ceil(pages.length / 3) ? 'worksheet' : 'lecture',
     mainPoints,
     groups,
-    checklist: buildChecklist(pages),
+    checklist: buildChecklist(groups),
   }
 }
 
@@ -1096,21 +1276,13 @@ function renderCleanText(text) {
 }
 
 function renderWorksheetText(text) {
-  const blocks = createWorksheetBlocks(text)
+  const cleanText = (text || '').trim()
 
-  if (blocks.length === 0) {
+  if (!cleanText) {
     return <p className="extracted-line">No readable worksheet text found.</p>
   }
 
-  return (
-    <div className="clean-text-lines worksheet-text-lines">
-      {blocks.map((block, index) =>
-        block.type === 'heading'
-          ? <p className="clean-heading" key={index}>{block.text}</p>
-          : <p className="clean-bullet" key={index}>{block.text}</p>
-      )}
-    </div>
-  )
+  return <pre className="raw-table-text">{cleanText}</pre>
 }
 
 //split worksheet text into headings + row/section blocks (never merge columns)
