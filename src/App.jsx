@@ -447,9 +447,13 @@ function App() {
     }
   }
 
-  function renderCleanText(text) {
+  function renderCleanText(text, options = {}) {
     if (!text) {
       return <p className="extracted-line">No readable text found.</p>
+    }
+
+    if (options.formatWorksheet) {
+      return renderWorksheetText(text)
     }
 
     const lines = text.split('\n').filter(Boolean)
@@ -472,6 +476,118 @@ function App() {
         })}
       </div>
     )
+  }
+
+  function renderWorksheetText(text) {
+    const blocks = createWorksheetBlocks(text)
+
+    if (blocks.length === 0) {
+      return <p className="extracted-line">No readable worksheet text found.</p>
+    }
+
+    return (
+      <div className="clean-text-lines worksheet-text-lines">
+        {blocks.map((block, index) => {
+          if (block.type === 'heading') {
+            return <p className="clean-heading" key={index}>{block.text}</p>
+          }
+
+          return <p className="clean-bullet" key={index}>{block.text}</p>
+        })}
+      </div>
+    )
+  }
+
+  function createWorksheetBlocks(text) {
+    const lines = text
+      .split('\n')
+      .map((line) => cleanLine(line))
+      .filter(Boolean)
+
+    const blocks = []
+    let paragraphLines = []
+
+    function flushParagraph() {
+      if (paragraphLines.length === 0) return
+
+      const paragraph = cleanLine(paragraphLines.join(' '))
+      const bulletSentences = splitParagraphIntoReadableBullets(paragraph)
+
+      for (const sentence of bulletSentences) {
+        if (sentence.length >= 8) {
+          blocks.push({ type: 'bullet', text: sentence })
+        }
+      }
+
+      paragraphLines = []
+    }
+
+    for (const line of lines) {
+      if (isWorksheetHeading(line)) {
+        flushParagraph()
+        blocks.push({ type: 'heading', text: line })
+        continue
+      }
+
+      if (isStandaloneBullet(line)) {
+        flushParagraph()
+        blocks.push({ type: 'bullet', text: line.replace(/^[-*•○●▪▫◦]\s*/, '') })
+        continue
+      }
+
+      paragraphLines.push(line)
+
+      if (endsLikeCompleteSentence(line)) {
+        flushParagraph()
+      }
+    }
+
+    flushParagraph()
+
+    return blocks
+  }
+
+  function isWorksheetHeading(line) {
+    const cleaned = line.replace(/^\(?[a-z]\)?\s*/i, '').trim()
+
+    return (
+      /^\([a-z]\)\s+/i.test(line) ||
+      /^task\s+\d+/i.test(line) ||
+      /^step\s+\d+/i.test(line) ||
+      /^(brainstorming|discussion|team discussion|issue identified|possible cause|affected unit operation|suggest|insert|finally|checklist)/i.test(line) ||
+      (line.endsWith(':') && line.length <= 120) ||
+      (cleaned.length <= 95 && /bfd|mass balance|modification|discussion|question|operation|technology|configuration|option|checklist/i.test(cleaned))
+    )
+  }
+
+  function isStandaloneBullet(line) {
+    return /^[-*•]\s/.test(line) || /^[○●▪▫◦]\s/.test(line)
+  }
+
+  function endsLikeCompleteSentence(line) {
+    return /[.!?]$/.test(line.trim())
+  }
+
+  function splitParagraphIntoReadableBullets(paragraph) {
+    const cleaned = cleanLine(paragraph)
+      .replace(/\s+([,.;:!?])/g, '$1')
+      .replace(/\s*\/\s*/g, ' / ')
+
+    if (!cleaned) return []
+
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+(?=[A-Z(])/g)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
+
+    if (sentences.length > 1) {
+      return sentences
+    }
+
+    return cleaned
+      .split(/\s+(?=(?:However|Lastly|Therefore|Hence|This is important|This helps|It is important|It can|It will|By changing)\b)/g)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean)
   }
 
   function handleClear() {
@@ -585,7 +701,7 @@ function App() {
                 <div className="slide-explanation">
                   <h4>{slide.documentNotes.title}</h4>
                   <p>{slide.documentNotes.note}</p>
-                  {slide.documentNotes.mode === 'clean-text' && renderCleanText(slide.cleanText)}
+                  {slide.documentNotes.mode === 'clean-text' && renderCleanText(slide.cleanText, { formatWorksheet: true })}
                 </div>
               )}
 
